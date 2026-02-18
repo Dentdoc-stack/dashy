@@ -3,6 +3,8 @@ risk_router.py — Risk & Recovery endpoints.
 Risk score distribution, recovery recommendations, trends.
 """
 
+import numpy as np
+import pandas as pd
 from fastapi import APIRouter, Query
 from backend.data_store import store
 from backend.utils import df_to_records, filter_df
@@ -97,3 +99,60 @@ def risk_trends():
             "total_sites": len(group),
         })
     return sorted(result, key=lambda x: x["timestamp"])
+
+
+@router.get("/actual-vs-planned")
+def actual_vs_planned(package_name: str | None = Query(None)):
+    """
+    Per-package actual progress vs planned (schedule-based) progress.
+
+    planned_progress = avg of ((today - planned_start) / (planned_finish - planned_start) * 100)
+                       across all tasks with valid dates, clipped to [0, 100].
+    actual_progress  = avg site_progress across all sites in the package.
+    """
+    df_tasks = store.df_tasks
+    df_site = store.df_site
+
+    if df_tasks.empty or df_site.empty:
+        return []
+
+    if package_name:
+        df_tasks = df_tasks[df_tasks["package_name"] == package_name]
+        df_site = df_site[df_site["package_name"] == package_name]
+
+    today = pd.Timestamp.now().normalize()
+
+    # Compute per-task planned progress (schedule elapsed %)
+    ps = df_tasks.get("planned_start")
+    pf = df_tasks.get("planned_finish")
+
+    result = []
+
+    for pkg in df_site["package_name"].unique():
+        pkg_tasks = df_tasks[df_tasks["package_name"] == pkg]
+        pkg_sites = df_site[df_site["package_name"] == pkg]
+
+        # Actual progress
+        actual = round(float(pkg_sites["site_progress"].mean()), 1) if not pkg_sites.empty else 0.0
+
+        # Planned (schedule-elapsed) progress
+        planned = 0.0
+        if "planned_start" in pkg_tasks.columns and "planned_finish" in pkg_tasks.columns:
+            ps_col = pkg_tasks["planned_start"]
+            pf_col = pkg_tasks["planned_finish"]
+            valid = ps_col.notna() & pf_col.notna() & (pf_col > ps_col)
+            if valid.any():
+                total_dur = (pf_col[valid] - ps_col[valid]).dt.days
+                elapsed = (today - ps_col[valid]).dt.days
+                pct = (elapsed / total_dur * 100).clip(0, 100)
+                planned = round(float(pct.mean()), 1)
+
+        result.append({
+            "package_name": pkg,
+            "actual_progress": actual,
+            "planned_progress": planned,
+            "variance": round(actual - planned, 1),
+        })
+
+    result.sort(key=lambda x: x["package_name"])
+    return result

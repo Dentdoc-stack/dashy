@@ -5,7 +5,7 @@ import {
   fetchRiskScores,
   fetchRiskDistribution,
   fetchRecoveryCandidates,
-  fetchRiskTrends,
+  fetchActualVsPlanned,
   fetchPackageNames,
   fetchDistricts,
 } from "@/lib/api";
@@ -37,9 +37,9 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  LineChart,
-  Line,
+  Cell,
   Legend,
+  ReferenceLine,
 } from "recharts";
 
 const RISK_COLORS = ["#22c55e", "#84cc16", "#f59e0b", "#f97316", "#ef4444"];
@@ -84,9 +84,9 @@ export default function RiskRecoveryPage() {
     queryFn: () => fetchRecoveryCandidates(pkgFilter),
   });
 
-  const { data: trends } = useQuery({
-    queryKey: ["risk-trends"],
-    queryFn: fetchRiskTrends,
+  const { data: avp } = useQuery({
+    queryKey: ["actual-vs-planned", pkgFilter],
+    queryFn: () => fetchActualVsPlanned(pkgFilter),
   });
 
   return (
@@ -151,44 +151,47 @@ export default function RiskRecoveryPage() {
           </CardContent>
         </Card>
 
-        {/* Trend Chart */}
+        {/* Actual vs Planned Chart */}
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
               <TrendingDown className="h-4 w-4" />
-              Historical Trends
+              Actual vs Planned Progress
             </CardTitle>
           </CardHeader>
           <CardContent>
-            {trends && trends.length > 0 ? (
+            {avp && avp.length > 0 ? (
               <ResponsiveContainer width="100%" height={300}>
-                <LineChart data={trends}>
+                <BarChart
+                  data={avp.map((d) => ({
+                    ...d,
+                    name: d.package_name.replace(/Package-?/i, "Pkg ").replace(/BEmONC /i, "").replace(/CEmONC /i, "CEmONC ").replace(/Warehouses /i, "WH ").replace(/Prefab /i, "Prefab "),
+                  }))}
+                  margin={{ top: 4, right: 8, left: 0, bottom: 60 }}
+                >
                   <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                  <XAxis dataKey="timestamp" className="text-xs" tick={{ fontSize: 10 }} />
-                  <YAxis className="text-xs" />
-                  <Tooltip />
-                  <Legend />
-                  <Line
-                    type="monotone"
-                    dataKey="avg_progress"
-                    stroke="#3b82f6"
-                    name="Avg Progress %"
-                    strokeWidth={2}
-                    dot={false}
+                  <XAxis
+                    dataKey="name"
+                    tick={{ fontSize: 10 }}
+                    angle={-35}
+                    textAnchor="end"
+                    interval={0}
                   />
-                  <Line
-                    type="monotone"
-                    dataKey="avg_risk_score"
-                    stroke="#ef4444"
-                    name="Avg Risk Score"
-                    strokeWidth={2}
-                    dot={false}
+                  <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} unit="%" />
+                  <Tooltip
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    formatter={(val: any) => [`${val ?? 0}%`]}
+                    labelFormatter={(label) => `Package: ${label}`}
                   />
-                </LineChart>
+                  <Legend verticalAlign="top" />
+                  <ReferenceLine y={0} stroke="#888" />
+                  <Bar dataKey="planned_progress" name="Planned %" fill="#94a3b8" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="actual_progress" name="Actual %" fill="#3b82f6" radius={[3, 3, 0, 0]} />
+                </BarChart>
               </ResponsiveContainer>
             ) : (
               <div className="flex items-center justify-center h-[300px] text-muted-foreground text-sm">
-                No trend data yet. Refresh data to start collecting snapshots.
+                No data available.
               </div>
             )}
           </CardContent>
@@ -313,6 +316,3 @@ export default function RiskRecoveryPage() {
     </div>
   );
 }
-
-// Need Cell import for BarChart coloring
-import { Cell } from "recharts";

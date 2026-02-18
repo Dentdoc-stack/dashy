@@ -167,14 +167,21 @@ def _get_today():
 
 
 def _compute_task_delay(df: pd.DataFrame) -> pd.DataFrame:
-    """§9.1 — Task-level delay (date-based)."""
+    """§9.1 — Task-level delay (date-based).
+
+    task_delay_days:    days overdue (clipped to 0; NaN if no planned_finish).
+    task_duration_days: planned duration in days, used as weight in site-level
+                        weighted-average delay aggregation (min 1 day).
+    """
     today = _get_today()
 
     pf = df.get("planned_finish")
     af = df.get("actual_finish")
+    ps = df.get("planned_start")
 
     if pf is None:
         df["task_delay_days"] = np.nan
+        df["task_duration_days"] = np.nan
         return df
 
     effective_finish = af.copy() if af is not None else pd.Series(pd.NaT, index=df.index)
@@ -184,6 +191,13 @@ def _compute_task_delay(df: pd.DataFrame) -> pd.DataFrame:
     df["task_delay_days"] = raw_delay.clip(lower=0)
     # Where planned_finish is missing → NaN
     df.loc[pf.isna(), "task_delay_days"] = np.nan
+
+    # Task duration (planned_finish − planned_start), minimum 1 day to avoid zero weights
+    if ps is not None:
+        duration = (pf - ps).dt.days.clip(lower=1)
+        df["task_duration_days"] = duration.where(pf.notna() & ps.notna(), other=np.nan)
+    else:
+        df["task_duration_days"] = np.nan
 
     return df
 
@@ -301,8 +315,34 @@ def build_site_summary(df_tasks: pd.DataFrame) -> pd.DataFrame:
 
     grp = df_tasks.groupby(SITE_KEY, dropna=False)
 
-    # §9.2 — Site-level delay
-    site_delay = grp["task_delay_days"].max().rename("site_delay_days")
+    # §9.2 — Site-level delay (duration-weighted average, split by task status)
+    #
+    # active_delay_days     — weighted avg delay of In Progress tasks (current problems)
+    # historical_delay_days — weighted avg delay of Completed tasks (past performance)
+    # site_delay_days       — active delay when In Progress tasks are delayed;
+    #                         falls back to historical delay; 0 when both are NaN
+
+    def _weighted_avg_delay(sub_df, status_filter):
+        """Duration-weighted average of task_delay_days for tasks matching status_filter."""
+        mask = sub_df["task_status"].isin(status_filter) & sub_df["task_delay_days"].notna()
+        filtered = sub_df[mask]
+        if filtered.empty:
+            return np.nan
+        weights = filtered["task_duration_days"].fillna(1.0)
+        return float(np.average(filtered["task_delay_days"], weights=weights))
+
+    active_delay = grp.apply(
+        lambda s: _weighted_avg_delay(s, ["In Progress"]),
+        include_groups=False,
+    ).rename("active_delay_days")
+
+    historical_delay = grp.apply(
+        lambda s: _weighted_avg_delay(s, ["Completed"]),
+        include_groups=False,
+    ).rename("historical_delay_days")
+
+    # site_delay_days: prioritise active; fall back to historical; 0 if neither exists
+    site_delay = active_delay.combine_first(historical_delay).fillna(0).rename("site_delay_days")
 
     # §9.4 — Discipline-balanced site progress
     disc_key = SITE_KEY + ["discipline"]
@@ -358,6 +398,8 @@ def build_site_summary(df_tasks: pd.DataFrame) -> pd.DataFrame:
     # Assemble df_site
     df_site = pd.DataFrame({
         "site_delay_days": site_delay,
+        "active_delay_days": active_delay,
+        "historical_delay_days": historical_delay,
         "site_progress": site_progress,
         "site_status": site_status,
         "earliest_planned_start": earliest_start,

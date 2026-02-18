@@ -176,3 +176,10 @@ export interface HealthCheck {
   rows_sites: number;
   cache_timestamp: string | null;
 }
+
+export interface ActualVsPlanned {
+  package_name: string;
+  actual_progress: number;
+  planned_progress: number;
+  variance: number;
+}

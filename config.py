@@ -3,6 +3,8 @@ config.py — CSV links, constants, column rename map, and all configurable para
 KP-HCIP Multi-Package Executive Dashboard
 """
 
+import os
+
 # ---------------------------------------------------------------------------
 # CSV Data Sources (Published Google Sheets)
 # ---------------------------------------------------------------------------
@@ -96,7 +98,7 @@ MOBILIZATION_PENALTY = 20  # added when mobilized_low_progress
 # ---------------------------------------------------------------------------
 # Cache Settings
 # ---------------------------------------------------------------------------
-CACHE_DIR = "data_cache"
+CACHE_DIR = os.environ.get("CACHE_DIR", "/tmp/data_cache")
 CACHE_LATEST_DIR = f"{CACHE_DIR}/latest"
 CACHE_SNAPSHOTS_DIR = f"{CACHE_DIR}/snapshots"
 INMEMORY_TTL_SECONDS = 3600        # 1 hour

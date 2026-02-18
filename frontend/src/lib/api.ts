@@ -17,6 +17,7 @@ import type {
   IPCStatus,
   PhotoEntry,
   HealthCheck,
+  ActualVsPlanned,
 } from "./types";
 
 // In the browser, API_BASE is "" so all /api/* calls go to the same origin.
@@ -99,6 +100,8 @@ export const fetchRecoveryCandidates = (pkg?: string, limit = 20) =>
     limit: String(limit),
   });
 export const fetchRiskTrends = () => fetchJSON<TrendPoint[]>("/api/risk/trends");
+export const fetchActualVsPlanned = (pkg?: string) =>
+  fetchJSON<ActualVsPlanned[]>("/api/risk/actual-vs-planned", pkg ? { package_name: pkg } : undefined);
 
 // ── Sites ──
 export const fetchSiteDetail = (pkg: string, dist: string, site: string) =>
